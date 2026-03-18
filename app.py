@@ -1,4 +1,3 @@
-
 import streamlit as st
 from openai import OpenAI
 from rag_pipeline import build_index, generate_answer
@@ -13,15 +12,9 @@ st.set_page_config(
 st.title("🧠 Knowledge Assistant")
 st.caption("Enterprise RAG with role-based access control")
 
-# ── Sidebar ──────────────────────────────────────────────────────
+# ── Sidebar — role selection only, no API key input ──────────────
 with st.sidebar:
     st.header("Settings")
-    api_key = st.text_input(
-        "OpenAI API Key",
-        type="password",
-        help="Enter your OpenAI API key"
-    )
-    st.divider()
     st.subheader("Select Your Role")
     role = st.radio(
         "Role",
@@ -40,47 +33,61 @@ with st.sidebar:
     - 👨‍🏫 Trainer: All levels
     """)
 
-# ── Index builder ────────────────────────────────────────────────
+# ── Load API key from Streamlit secrets ──────────────────────────
+api_key = st.secrets["OPENAI_API_KEY"]
+client = OpenAI(api_key=api_key)
+
+# ── Build index once per session ─────────────────────────────────
 @st.cache_resource
 def load_index(api_key):
     with st.spinner("Building knowledge index... (~30 seconds)"):
         collection, embeddings = build_index(api_key)
     return collection, embeddings
 
-# ── Main interface ───────────────────────────────────────────────
-if not api_key:
-    st.info("Enter your OpenAI API key in the sidebar to get started.")
-    st.stop()
-
 collection, embeddings = load_index(api_key)
-client = OpenAI(api_key=api_key)
 
-st.success(f"Knowledge base ready. Logged in as: **{role}**")
+# ── Chat history ─────────────────────────────────────────────────
+if "messages" not in st.session_state:
+    st.session_state.messages = []
 
-query = st.text_input(
-    "Ask a question",
-    placeholder="e.g. What is the theory of mind in hypnotherapy?"
-)
+if "current_role" not in st.session_state:
+    st.session_state.current_role = role
 
-if query:
-    with st.spinner("Retrieving and generating answer..."):
-        result = generate_answer(query, role, collection, embeddings, client)
+# Reset chat if role changes
+if st.session_state.current_role != role:
+    st.session_state.messages = []
+    st.session_state.current_role = role
+    st.info(f"Role changed to {role}. Starting fresh conversation.")
 
-    st.markdown("### Answer")
-    st.write(result["answer"])
+# ── Display chat history ─────────────────────────────────────────
+for message in st.session_state.messages:
+    with st.chat_message(message["role"]):
+        st.write(message["content"])
+        if "sources" in message:
+            with st.expander("Sources"):
+                for source in message["sources"]:
+                    st.write(f"- {source}")
 
-    with st.expander("Sources used"):
-        for source in result["sources"]:
-            st.write(f"- {source}")
+# ── Chat input ───────────────────────────────────────────────────
+if query := st.chat_input("Ask a question..."):
 
-    with st.expander("Retrieved chunks with scores"):
-        for i, chunk in enumerate(result["ranked_chunks"]):
-            st.markdown(f"**Rank {i+1}: {chunk['metadata']['title']}**")
-            st.caption(
-                f"Semantic: {chunk['semantic_score']} | "
-                f"Authority: {chunk['authority_score']} | "
-                f"Freshness: {chunk['freshness_score']} | "
-                f"Final: {chunk['final_score']}"
-            )
-            st.write(chunk["text"][:300] + "...")
-            st.divider()
+    # Show user message
+    with st.chat_message("user"):
+        st.write(query)
+    st.session_state.messages.append({"role": "user", "content": query})
+
+    # Generate answer
+    with st.chat_message("assistant"):
+        with st.spinner("Thinking..."):
+            result = generate_answer(query, role, collection, embeddings, client)
+        st.write(result["answer"])
+        with st.expander("Sources"):
+            for source in result["sources"]:
+                st.write(f"- {source}")
+
+    # Save assistant message
+    st.session_state.messages.append({
+        "role": "assistant",
+        "content": result["answer"],
+        "sources": result["sources"]
+    })
