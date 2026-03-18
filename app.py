@@ -69,4 +69,30 @@ for message in st.session_state.messages:
                     st.write(f"- {source}")
 
 # ── Chat input ───────────────────────────────────────────────────
-if query :
+if query := st.chat_input("Ask a question..."):
+
+    # Show user message
+    with st.chat_message("user"):
+        st.write(query)
+    st.session_state.messages.append({"role": "user", "content": query})
+
+    # Generate answer
+    with st.chat_message("assistant"):
+        with st.spinner("Thinking..."):
+            result = generate_answer(
+                query, role, collection, embeddings, client,
+                chat_history=st.session_state.messages
+            )
+        st.write(result["answer"])
+        with st.expander("Sources"):
+            for source in result["sources"]:
+                st.write(f"- {source}")
+        with st.expander("Query rewritten to"):
+            st.caption(result["rewritten_query"])
+
+    # Save assistant message
+    st.session_state.messages.append({
+        "role": "assistant",
+        "content": result["answer"],
+        "sources": result["sources"]
+    })
