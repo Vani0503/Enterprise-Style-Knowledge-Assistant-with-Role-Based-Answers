@@ -151,7 +151,7 @@ Rules:
     return response.choices[0].message.content.strip()
 
 # ── Retrieval ───────────────────────────────────────────────────
-def retrieve_for_role(query, role, collection, embeddings, n_results=5):
+def retrieve_for_role(query, role, collection, embeddings, n_results=8):
     if role not in ROLE_ACCESS:
         raise ValueError(f"Unknown role: {role}")
     max_level = ROLE_ACCESS[role]
@@ -214,7 +214,8 @@ def generate_answer(query, role, collection, embeddings, openai_client, chat_his
 
     system_prompt = f"""You are an EKAA hypnotherapy knowledge assistant.
 {role_instructions[role]}
-Answer using ONLY the context below.
+Answer using the context below. Use ALL relevant chunks across any level available to you.
+If a foundational concept like hypnosis or suggestibility is asked, always include the core definition even if higher level content is also retrieved.
 If context is insufficient, say so clearly.
 Always mention which level the information comes from.
 
