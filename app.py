@@ -5,12 +5,12 @@ from rag_pipeline import build_index, generate_answer
 
 # ── Page config ─────────────────────────────────────────────────
 st.set_page_config(
-    page_title="EKAA Knowledge Assistant",
+    page_title="Knowledge Assistant",
     page_icon="🧠",
     layout="centered"
 )
 
-st.title("🧠 EKAA Knowledge Assistant")
+st.title("🧠 Knowledge Assistant")
 st.caption("Enterprise RAG with role-based access control")
 
 # ── Sidebar ──────────────────────────────────────────────────────
