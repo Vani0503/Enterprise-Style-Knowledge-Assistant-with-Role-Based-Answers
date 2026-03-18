@@ -150,4 +150,100 @@ Rules:
 
     return response.choices[0].message.content.strip()
 
-# ── Ret
+# ── Retrieval ───────────────────────────────────────────────────
+def retrieve_for_role(query, role, collection, embeddings, n_results=5):
+    if role not in ROLE_ACCESS:
+        raise ValueError(f"Unknown role: {role}")
+    max_level = ROLE_ACCESS[role]
+    query_embedding = embeddings.embed_query(query)
+    return collection.query(
+        query_embeddings=[query_embedding],
+        n_results=n_results,
+        where={"level": {"$lte": max_level}},
+        include=["documents", "metadatas", "distances"]
+    )
+
+# ── Ranking ─────────────────────────────────────────────────────
+def rank_results(results):
+    ranked = []
+    for doc, meta, distance in zip(
+        results["documents"][0],
+        results["metadatas"][0],
+        results["distances"][0]
+    ):
+        semantic_score = 1 - (distance / 2)
+        authority_score = AUTHORITY_SCORES.get(meta["authority"], 0.5)
+        freshness_score = FRESHNESS_SCORES.get(meta["date"], 0.5)
+        final_score = (
+            0.7 * semantic_score +
+            0.2 * authority_score +
+            0.1 * freshness_score
+        )
+        ranked.append({
+            "text": doc,
+            "metadata": meta,
+            "semantic_score": round(semantic_score, 3),
+            "authority_score": authority_score,
+            "freshness_score": freshness_score,
+            "final_score": round(final_score, 3)
+        })
+    ranked.sort(key=lambda x: x["final_score"], reverse=True)
+    return ranked
+
+# ── Answer Generation ───────────────────────────────────────────
+def generate_answer(query, role, collection, embeddings, openai_client, chat_history=None):
+
+    # Step 1: Rewrite query using conversation history
+    rewritten_query = rewrite_query(query, chat_history, openai_client)
+
+    # Step 2: Retrieve using the REWRITTEN query
+    results = retrieve_for_role(rewritten_query, role, collection, embeddings)
+    ranked = rank_results(results)
+
+    context = "\n\n---\n\n".join([
+        f"Source: {r['metadata']['title']} (Level {r['metadata']['level']})"
+        f"\n{r['text']}"
+        for r in ranked
+    ])
+
+    role_instructions = {
+        "student": "You are answering a student enrolled in Level 1 hypnotherapy training. Keep answers foundational and avoid advanced clinical concepts.",
+        "practitioner": "You are answering a certified hypnotherapy practitioner. You can reference clinical techniques up to Level 3.",
+        "trainer": "You are answering a senior trainer with full curriculum access. You can reference any level including advanced spiritual hypnotherapy."
+    }
+
+    system_prompt = f"""You are an EKAA hypnotherapy knowledge assistant.
+{role_instructions[role]}
+Answer using ONLY the context below.
+If context is insufficient, say so clearly.
+Always mention which level the information comes from.
+
+CONTEXT:
+{context}"""
+
+    # Build messages with history for generation
+    messages = [{"role": "system", "content": system_prompt}]
+
+    if chat_history:
+        for msg in chat_history[-6:]:
+            messages.append({
+                "role": msg["role"],
+                "content": msg["content"]
+            })
+
+    messages.append({"role": "user", "content": rewritten_query})
+
+    response = openai_client.chat.completions.create(
+        model="gpt-4o-mini",
+        messages=messages,
+        max_tokens=500
+    )
+
+    return {
+        "query": query,
+        "rewritten_query": rewritten_query,
+        "role": role,
+        "answer": response.choices[0].message.content,
+        "sources": list(set([r["metadata"]["title"] for r in ranked])),
+        "ranked_chunks": ranked
+    }
