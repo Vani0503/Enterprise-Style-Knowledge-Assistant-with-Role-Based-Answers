@@ -12,7 +12,7 @@ st.set_page_config(
 st.title("🧠 Knowledge Assistant")
 st.caption("Enterprise RAG with role-based access control")
 
-# ── Sidebar — role selection only, no API key input ──────────────
+# ── Sidebar — role selection only ────────────────────────────────
 with st.sidebar:
     st.header("Settings")
     st.subheader("Select Your Role")
@@ -69,25 +69,4 @@ for message in st.session_state.messages:
                     st.write(f"- {source}")
 
 # ── Chat input ───────────────────────────────────────────────────
-if query := st.chat_input("Ask a question..."):
-
-    # Show user message
-    with st.chat_message("user"):
-        st.write(query)
-    st.session_state.messages.append({"role": "user", "content": query})
-
-    # Generate answer
-    with st.chat_message("assistant"):
-        with st.spinner("Thinking..."):
-            result = generate_answer(query, role, collection, embeddings, client)
-        st.write(result["answer"])
-        with st.expander("Sources"):
-            for source in result["sources"]:
-                st.write(f"- {source}")
-
-    # Save assistant message
-    st.session_state.messages.append({
-        "role": "assistant",
-        "content": result["answer"],
-        "sources": result["sources"]
-    })
+if query :
