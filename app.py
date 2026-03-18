@@ -46,21 +46,16 @@ def load_index(api_key):
 
 collection, embeddings = load_index(api_key)
 
-# ── Chat history ─────────────────────────────────────────────────
+# ── Chat history — separate per role ─────────────────────────────
 if "messages" not in st.session_state:
-    st.session_state.messages = []
+    st.session_state.messages = {
+        "student": [],
+        "practitioner": [],
+        "trainer": []
+    }
 
-if "current_role" not in st.session_state:
-    st.session_state.current_role = role
-
-# Reset chat if role changes
-if st.session_state.current_role != role:
-    st.session_state.messages = []
-    st.session_state.current_role = role
-    st.info(f"Role changed to {role}. Starting fresh conversation.")
-
-# ── Display chat history ─────────────────────────────────────────
-for message in st.session_state.messages:
+# ── Display chat history for current role ────────────────────────
+for message in st.session_state.messages[role]:
     with st.chat_message(message["role"]):
         st.write(message["content"])
         if "sources" in message:
@@ -74,14 +69,14 @@ if query := st.chat_input("Ask a question..."):
     # Show user message
     with st.chat_message("user"):
         st.write(query)
-    st.session_state.messages.append({"role": "user", "content": query})
+    st.session_state.messages[role].append({"role": "user", "content": query})
 
     # Generate answer
     with st.chat_message("assistant"):
         with st.spinner("Thinking..."):
             result = generate_answer(
                 query, role, collection, embeddings, client,
-                chat_history=st.session_state.messages
+                chat_history=st.session_state.messages[role]
             )
         st.write(result["answer"])
         with st.expander("Sources"):
@@ -90,8 +85,8 @@ if query := st.chat_input("Ask a question..."):
         with st.expander("Query rewritten to"):
             st.caption(result["rewritten_query"])
 
-    # Save assistant message
-    st.session_state.messages.append({
+    # Save assistant message to that role's history
+    st.session_state.messages[role].append({
         "role": "assistant",
         "content": result["answer"],
         "sources": result["sources"]
