@@ -74,7 +74,7 @@ if "message_counts" not in st.session_state:
         "trainer": 0
     }
 
-# ── Chat input — MUST come before display loop ───────────────────
+# ── Chat input — comes before display loop ───────────────────────
 query = st.chat_input("Ask a question...")
 
 if query:
@@ -114,42 +114,41 @@ if query:
             "rewritten_query": query
         })
 
-    # PostHog logging
-    # Only count as rewritten if the change is meaningful — more than just casing/spacing
-original = query.strip().lower()
-rewritten = result["rewritten_query"].strip().lower() if result else original
-query_was_rewritten = (
-    result is not None and
-    rewritten != original and
-    len(rewritten) > len(original) * 0.8  # rewritten query should be meaningfully different
+    # ── PostHog logging ──────────────────────────────────────────
+    query_was_rewritten = (
+        result is not None and
+        result["rewritten_query"].strip().lower() != query.strip().lower()
     )
 
-    ph_client.capture(
-        distinct_id=st.session_state.session_id,
-        event="query_asked",
-        properties={
-            "session_id": st.session_state.session_id,
-            "role": role,
-            "original_query": query,
-            "rewritten_query": result["rewritten_query"] if result else None,
-            "query_was_rewritten": query_was_rewritten,
-            "sources_used": result["sources"] if result else [],
-            "answer_length": len(result["answer"]) if result else 0,
-            "message_number_in_session": message_number,
-            "error": error_occurred,
-            "timestamp": datetime.utcnow().isoformat()
-        }
-    )
+    try:
+        ph_client.capture(
+            distinct_id=st.session_state.session_id,
+            event="query_asked",
+            properties={
+                "session_id": st.session_state.session_id,
+                "role": role,
+                "original_query": query,
+                "rewritten_query": result["rewritten_query"] if result else None,
+                "query_was_rewritten": query_was_rewritten,
+                "sources_used": result["sources"] if result else [],
+                "answer_length": len(result["answer"]) if result else 0,
+                "message_number_in_session": message_number,
+                "error": error_occurred,
+                "timestamp": datetime.utcnow().isoformat()
+            }
+        )
+    except Exception:
+        pass  # Never let analytics failure break the app
 
 # ── Display full conversation for current role ───────────────────
 for message in st.session_state.messages[role]:
     with st.chat_message(message["role"]):
         st.write(message["content"])
-        if message["role"] == "assistant" and "sources" in message:
-            if message["sources"]:
+        if message["role"] == "assistant":
+            if message.get("sources"):
                 with st.expander("Sources"):
                     for source in message["sources"]:
                         st.write(f"- {source}")
-            if "rewritten_query" in message and message["rewritten_query"]:
+            if message.get("rewritten_query") and message["rewritten_query"].strip().lower() != "":
                 with st.expander("Query rewritten to"):
                     st.caption(message["rewritten_query"])
