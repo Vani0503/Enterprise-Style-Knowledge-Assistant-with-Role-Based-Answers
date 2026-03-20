@@ -1,7 +1,7 @@
 import streamlit as st
 from openai import OpenAI
 from rag_pipeline import build_index, generate_answer
-import posthog
+from posthog import Posthog
 import uuid
 from datetime import datetime
 
@@ -16,8 +16,10 @@ st.title("🧠 Knowledge Assistant")
 st.caption("Enterprise RAG with role-based access control")
 
 # ── PostHog setup ────────────────────────────────────────────────
-posthog.project_api_key = st.secrets["POSTHOG_API_KEY"]
-posthog.host = "https://us.i.posthog.com"
+ph_client = Posthog(
+    project_api_key=st.secrets["POSTHOG_API_KEY"],
+    host="https://us.i.posthog.com"
+)
 
 # ── Session ID — unique per browser session ──────────────────────
 if "session_id" not in st.session_state:
@@ -120,7 +122,7 @@ if query := st.chat_input("Ask a question..."):
         result["rewritten_query"].strip().lower() != query.strip().lower()
     )
 
-    posthog.capture(
+    ph_client.capture(
         distinct_id=st.session_state.session_id,
         event="query_asked",
         properties={
