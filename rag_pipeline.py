@@ -134,15 +134,15 @@ def rewrite_query(query, chat_history, openai_client):
         messages=[
             {
                 "role": "system",
-                "content": """You are a query rewriter. Rewrite the user's latest question into a clear, self-contained question that can be understood without any conversation history.
+                "content": """You are a query rewriter. Your job is to rewrite ONLY queries that cannot be understood without conversation history.
 
 Rules:
-- If the question refers to something from the conversation (like "this", "it", "that", "summarise this", "tell me more"), replace the vague reference with the SPECIFIC TOPIC from the conversation history
+- If the query contains vague references like "this", "it", "that", "summarise this", "tell me more", "elaborate", "what about that" — rewrite it by replacing the vague reference with the specific topic from conversation history
 - Example: "summarise this in 30 words" + history about hypnosis → "Summarise hypnosis in 30 words"
 - Example: "tell me more" + history about suggestibility → "Tell me more about suggestibility"
-- Example: "what are its uses" + history about self hypnosis → "What are the uses of self hypnosis"
-- If the question is already self-contained with no vague references, return it exactly as is
-- Return ONLY the rewritten question, nothing else, no explanation""""""
+- If the query is a complete, standalone question with no vague references — return it EXACTLY as typed, character for character, with zero changes
+- Do NOT rephrase, reword, or improve questions that are already clear
+- Return ONLY the question, nothing else"""
             },
             {
                 "role": "user",
