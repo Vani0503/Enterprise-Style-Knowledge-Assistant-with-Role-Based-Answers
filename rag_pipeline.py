@@ -116,9 +116,9 @@ def build_index(openai_api_key):
 # ── Query Rewriter ──────────────────────────────────────────────
 def rewrite_query(query, chat_history, openai_client):
     """
-    Rewrites a vague or follow-up query into a self-contained
-    question using conversation history.
-    Uses a principle-based approach — no word lists needed.
+    Two-step approach:
+    Step 1: LLM decides if rewriting is needed (yes/no)
+    Step 2: Only if yes, LLM rewrites using history
     """
     if not chat_history or len(chat_history) == 0:
         return query
@@ -128,30 +128,58 @@ def rewrite_query(query, chat_history, openai_client):
         for msg in chat_history[-6:]
     ])
 
-    response = openai_client.chat.completions.create(
+    # Step 1: Should this query be rewritten?
+    check_response = openai_client.chat.completions.create(
+        model="gpt-4o-mini",
+        max_tokens=10,
+        messages=[
+            {
+                "role": "system",
+                "content": """You decide if a query needs conversation history to be understood.
+
+Answer only YES or NO.
+YES: query refers to something from earlier conversation and cannot be understood standalone
+NO: query is a complete standalone question that needs no prior context
+
+Examples of YES: "summarise this", "tell me more", "what about that", "explain it further", "give me the gist", "in simpler terms", "elaborate", "break it down"
+Examples of NO: "what is hypnosis", "tell me about suggestibility", "how does self hypnosis work" """
+            },
+            {
+                "role": "user",
+                "content": f"Conversation history:\n{history_text}\n\nQuery: {query}\n\nDoes this query need history to be understood? Answer YES or NO only:"
+            }
+        ]
+    )
+
+    needs_rewrite = check_response.choices[0].message.content.strip().upper().startswith("YES")
+
+    if not needs_rewrite:
+        return query
+
+    # Step 2: Rewrite using history
+    rewrite_response = openai_client.chat.completions.create(
         model="gpt-4o-mini",
         max_tokens=100,
         messages=[
             {
                 "role": "system",
-                "content": """You are a query rewriter. Your job is to rewrite ONLY queries that cannot be understood without conversation history.
+                "content": """Rewrite the query by replacing vague references with the specific topic from conversation history.
 
-Rules:
-- If the query contains vague references like "this", "it", "that", "summarise this", "tell me more", "elaborate", "what about that" — rewrite it by replacing the vague reference with the specific topic from conversation history
-- Example: "summarise this in 30 words" + history about hypnosis → "Summarise hypnosis in 30 words"
-- Example: "tell me more" + history about suggestibility → "Tell me more about suggestibility"
-- If the query is a complete, standalone question with no vague references — return it EXACTLY as typed, character for character, with zero changes
-- Do NOT rephrase, reword, or improve questions that are already clear
-- Return ONLY the question, nothing else"""
+Examples:
+- "summarise this in 30 words" + history about hypnosis → "Summarise hypnosis in 30 words"
+- "tell me more" + history about suggestibility → "Tell me more about suggestibility"
+- "explain it further" + history about self hypnosis → "Explain self hypnosis further"
+
+Return ONLY the rewritten question, nothing else."""
             },
             {
                 "role": "user",
-                "content": f"Conversation history:\n{history_text}\n\nLatest question: {query}\n\nRewritten question:"
+                "content": f"Conversation history:\n{history_text}\n\nQuery: {query}\n\nRewritten query:"
             }
         ]
     )
 
-    return response.choices[0].message.content.strip()
+    return rewrite_response.choices[0].message.content.strip()
 
 # ── Retrieval ───────────────────────────────────────────────────
 def retrieve_for_role(query, role, collection, embeddings, n_results=8):
