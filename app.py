@@ -21,7 +21,7 @@ ph_client = Posthog(
     host="https://us.i.posthog.com"
 )
 
-# ── Session ID — unique per browser session ──────────────────────
+# ── Session ID ───────────────────────────────────────────────────
 if "session_id" not in st.session_state:
     st.session_state.session_id = str(uuid.uuid4())
 
@@ -59,7 +59,7 @@ def load_index(api_key):
 
 collection, embeddings = load_index(api_key)
 
-# ── Chat history — separate per role ─────────────────────────────
+# ── Initialise session state ─────────────────────────────────────
 if "messages" not in st.session_state:
     st.session_state.messages = {
         "student": [],
@@ -67,7 +67,6 @@ if "messages" not in st.session_state:
         "trainer": []
     }
 
-# ── Message counter per role for session depth ───────────────────
 if "message_counts" not in st.session_state:
     st.session_state.message_counts = {
         "student": 0,
@@ -75,22 +74,15 @@ if "message_counts" not in st.session_state:
         "trainer": 0
     }
 
-# ── Display chat history for current role ────────────────────────
-for message in st.session_state.messages[role]:
-    with st.chat_message(message["role"]):
-        st.write(message["content"])
-        if "sources" in message:
-            with st.expander("Sources"):
-                for source in message["sources"]:
-                    st.write(f"- {source}")
+# ── Chat input — MUST come before display loop ───────────────────
+query = st.chat_input("Ask a question...")
 
-# ── Chat input ───────────────────────────────────────────────────
-if query := st.chat_input("Ask a question..."):
-
-    # Show user message
-    with st.chat_message("user"):
-        st.write(query)
-    st.session_state.messages[role].append({"role": "user", "content": query})
+if query:
+    # Immediately save user message to state
+    st.session_state.messages[role].append({
+        "role": "user",
+        "content": query
+    })
     st.session_state.message_counts[role] += 1
     message_number = st.session_state.message_counts[role]
 
@@ -98,25 +90,31 @@ if query := st.chat_input("Ask a question..."):
     error_occurred = None
     result = None
 
-    with st.chat_message("assistant"):
-        with st.spinner("Thinking..."):
-            try:
-                result = generate_answer(
-                    query, role, collection, embeddings, client,
-                    chat_history=st.session_state.messages[role]
-                )
-                st.write(result["answer"])
-                with st.expander("Sources"):
-                    for source in result["sources"]:
-                        st.write(f"- {source}")
-                with st.expander("Query rewritten to"):
-                    st.caption(result["rewritten_query"])
+    try:
+        result = generate_answer(
+            query, role, collection, embeddings, client,
+            chat_history=st.session_state.messages[role]
+        )
+    except Exception as e:
+        error_occurred = str(e)
 
-            except Exception as e:
-                error_occurred = str(e)
-                st.error(f"Something went wrong: {error_occurred}")
+    # Save assistant message immediately
+    if result:
+        st.session_state.messages[role].append({
+            "role": "assistant",
+            "content": result["answer"],
+            "sources": result["sources"],
+            "rewritten_query": result["rewritten_query"]
+        })
+    elif error_occurred:
+        st.session_state.messages[role].append({
+            "role": "assistant",
+            "content": f"Something went wrong: {error_occurred}",
+            "sources": [],
+            "rewritten_query": query
+        })
 
-    # ── PostHog event logging ────────────────────────────────────
+    # PostHog logging
     query_was_rewritten = (
         result is not None and
         result["rewritten_query"].strip().lower() != query.strip().lower()
@@ -139,10 +137,15 @@ if query := st.chat_input("Ask a question..."):
         }
     )
 
-    # Save assistant message
-    if result:
-        st.session_state.messages[role].append({
-            "role": "assistant",
-            "content": result["answer"],
-            "sources": result["sources"]
-        })
+# ── Display full conversation for current role ───────────────────
+for message in st.session_state.messages[role]:
+    with st.chat_message(message["role"]):
+        st.write(message["content"])
+        if message["role"] == "assistant" and "sources" in message:
+            if message["sources"]:
+                with st.expander("Sources"):
+                    for source in message["sources"]:
+                        st.write(f"- {source}")
+            if "rewritten_query" in message and message["rewritten_query"]:
+                with st.expander("Query rewritten to"):
+                    st.caption(message["rewritten_query"])
