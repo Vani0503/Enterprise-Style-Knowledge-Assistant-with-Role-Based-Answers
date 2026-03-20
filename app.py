@@ -1,6 +1,9 @@
 import streamlit as st
 from openai import OpenAI
 from rag_pipeline import build_index, generate_answer
+import posthog
+import uuid
+from datetime import datetime
 
 # ── Page config ─────────────────────────────────────────────────
 st.set_page_config(
@@ -12,7 +15,15 @@ st.set_page_config(
 st.title("🧠 Knowledge Assistant")
 st.caption("Enterprise RAG with role-based access control")
 
-# ── Sidebar — role selection only ────────────────────────────────
+# ── PostHog setup ────────────────────────────────────────────────
+posthog.project_api_key = st.secrets["POSTHOG_API_KEY"]
+posthog.host = "https://us.i.posthog.com"
+
+# ── Session ID — unique per browser session ──────────────────────
+if "session_id" not in st.session_state:
+    st.session_state.session_id = str(uuid.uuid4())
+
+# ── Sidebar ──────────────────────────────────────────────────────
 with st.sidebar:
     st.header("Settings")
     st.subheader("Select Your Role")
@@ -54,6 +65,14 @@ if "messages" not in st.session_state:
         "trainer": []
     }
 
+# ── Message counter per role for session depth ───────────────────
+if "message_counts" not in st.session_state:
+    st.session_state.message_counts = {
+        "student": 0,
+        "practitioner": 0,
+        "trainer": 0
+    }
+
 # ── Display chat history for current role ────────────────────────
 for message in st.session_state.messages[role]:
     with st.chat_message(message["role"]):
@@ -70,24 +89,58 @@ if query := st.chat_input("Ask a question..."):
     with st.chat_message("user"):
         st.write(query)
     st.session_state.messages[role].append({"role": "user", "content": query})
+    st.session_state.message_counts[role] += 1
+    message_number = st.session_state.message_counts[role]
 
     # Generate answer
+    error_occurred = None
+    result = None
+
     with st.chat_message("assistant"):
         with st.spinner("Thinking..."):
-            result = generate_answer(
-                query, role, collection, embeddings, client,
-                chat_history=st.session_state.messages[role]
-            )
-        st.write(result["answer"])
-        with st.expander("Sources"):
-            for source in result["sources"]:
-                st.write(f"- {source}")
-        with st.expander("Query rewritten to"):
-            st.caption(result["rewritten_query"])
+            try:
+                result = generate_answer(
+                    query, role, collection, embeddings, client,
+                    chat_history=st.session_state.messages[role]
+                )
+                st.write(result["answer"])
+                with st.expander("Sources"):
+                    for source in result["sources"]:
+                        st.write(f"- {source}")
+                with st.expander("Query rewritten to"):
+                    st.caption(result["rewritten_query"])
 
-    # Save assistant message to that role's history
-    st.session_state.messages[role].append({
-        "role": "assistant",
-        "content": result["answer"],
-        "sources": result["sources"]
-    })
+            except Exception as e:
+                error_occurred = str(e)
+                st.error(f"Something went wrong: {error_occurred}")
+
+    # ── PostHog event logging ────────────────────────────────────
+    query_was_rewritten = (
+        result is not None and
+        result["rewritten_query"].strip().lower() != query.strip().lower()
+    )
+
+    posthog.capture(
+        distinct_id=st.session_state.session_id,
+        event="query_asked",
+        properties={
+            "session_id": st.session_state.session_id,
+            "role": role,
+            "original_query": query,
+            "rewritten_query": result["rewritten_query"] if result else None,
+            "query_was_rewritten": query_was_rewritten,
+            "sources_used": result["sources"] if result else [],
+            "answer_length": len(result["answer"]) if result else 0,
+            "message_number_in_session": message_number,
+            "error": error_occurred,
+            "timestamp": datetime.utcnow().isoformat()
+        }
+    )
+
+    # Save assistant message
+    if result:
+        st.session_state.messages[role].append({
+            "role": "assistant",
+            "content": result["answer"],
+            "sources": result["sources"]
+        })
