@@ -116,9 +116,8 @@ def build_index(openai_api_key):
 # ── Query Rewriter ──────────────────────────────────────────────
 def rewrite_query(query, chat_history, openai_client):
     """
-    Two-step approach:
-    Step 1: LLM decides if rewriting is needed (yes/no)
-    Step 2: Only if yes, LLM rewrites using history
+    Single structured call that reasons about whether rewriting
+    is needed and only rewrites if genuinely required.
     """
     if not chat_history or len(chat_history) == 0:
         return query
@@ -128,58 +127,47 @@ def rewrite_query(query, chat_history, openai_client):
         for msg in chat_history[-6:]
     ])
 
-    # Step 1: Should this query be rewritten?
-    check_response = openai_client.chat.completions.create(
+    response = openai_client.chat.completions.create(
         model="gpt-4o-mini",
-        max_tokens=10,
+        max_tokens=150,
         messages=[
             {
                 "role": "system",
-                "content": """You decide if a query needs conversation history to be understood.
+                "content": """You are a query analyzer. Given a conversation history and a latest query, decide if the query needs rewriting.
 
-Answer only YES or NO.
-YES: query refers to something from earlier conversation and cannot be understood standalone
-NO: query is a complete standalone question that needs no prior context
+A query needs rewriting ONLY if it contains pronouns or vague references that point to something in the conversation — words like "this", "it", "that", "those", "the above", or phrases like "tell me more", "summarise this", "explain further", "give me the gist", "break it down", "elaborate".
 
-Examples of YES: "summarise this", "tell me more", "what about that", "explain it further", "give me the gist", "in simpler terms", "elaborate", "break it down"
-Examples of NO: "what is hypnosis", "tell me about suggestibility", "how does self hypnosis work" """
+A query does NOT need rewriting if it is a complete, specific question that mentions the topic explicitly — like "what is hypnosis", "tell me about suggestibility", "how does self hypnosis work".
+
+Respond in exactly this format and nothing else:
+NEEDS_REWRITE: YES or NO
+REWRITTEN: [if YES, write the rewritten query with vague reference replaced by specific topic. If NO, copy the original query exactly word for word]"""
             },
             {
                 "role": "user",
-                "content": f"Conversation history:\n{history_text}\n\nQuery: {query}\n\nDoes this query need history to be understood? Answer YES or NO only:"
+                "content": f"Conversation history:\n{history_text}\n\nLatest query: {query}"
             }
         ]
     )
 
-    needs_rewrite = check_response.choices[0].message.content.strip().upper().startswith("YES")
+    output = response.choices[0].message.content.strip()
 
+    # Parse structured output
+    lines = output.split("\n")
+    needs_rewrite = False
+    rewritten = query
+
+    for line in lines:
+        if line.startswith("NEEDS_REWRITE:"):
+            needs_rewrite = "YES" in line.upper()
+        if line.startswith("REWRITTEN:"):
+            rewritten = line.replace("REWRITTEN:", "").strip()
+
+    # Safety check — if not rewriting, always return original unchanged
     if not needs_rewrite:
         return query
 
-    # Step 2: Rewrite using history
-    rewrite_response = openai_client.chat.completions.create(
-        model="gpt-4o-mini",
-        max_tokens=100,
-        messages=[
-            {
-                "role": "system",
-                "content": """Rewrite the query by replacing vague references with the specific topic from conversation history.
-
-Examples:
-- "summarise this in 30 words" + history about hypnosis → "Summarise hypnosis in 30 words"
-- "tell me more" + history about suggestibility → "Tell me more about suggestibility"
-- "explain it further" + history about self hypnosis → "Explain self hypnosis further"
-
-Return ONLY the rewritten question, nothing else."""
-            },
-            {
-                "role": "user",
-                "content": f"Conversation history:\n{history_text}\n\nQuery: {query}\n\nRewritten query:"
-            }
-        ]
-    )
-
-    return rewrite_response.choices[0].message.content.strip()
+    return rewritten
 
 # ── Retrieval ───────────────────────────────────────────────────
 def retrieve_for_role(query, role, collection, embeddings, n_results=8):
