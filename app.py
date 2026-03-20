@@ -115,9 +115,13 @@ if query:
         })
 
     # PostHog logging
-    query_was_rewritten = (
-        result is not None and
-        result["rewritten_query"].strip().lower() != query.strip().lower()
+    # Only count as rewritten if the change is meaningful — more than just casing/spacing
+original = query.strip().lower()
+rewritten = result["rewritten_query"].strip().lower() if result else original
+query_was_rewritten = (
+    result is not None and
+    rewritten != original and
+    len(rewritten) > len(original) * 0.8  # rewritten query should be meaningfully different
     )
 
     ph_client.capture(
