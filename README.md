@@ -17,6 +17,9 @@ This project builds the layer that makes RAG enterprise-safe: role-based access 
 URL: https://enterprise-style-knowledge-assistant-with-role-based-answers-j.streamlit.app/
 Select a role from the sidebar. Ask any question about hypnotherapy, breathing techniques, and human chakras. Switch roles and ask the same question — you will get a different answer drawn from different sources.
 
+# Analytics
+URL: https://us.posthog.com/project/350232/dashboard/1381621
+
 # Project Structure
 Enterprise-Style-Knowledge-Assistant-with-Role-Based-Answers/
 ├── app.py                  ← Streamlit UI: chat interface, role selection, session state
